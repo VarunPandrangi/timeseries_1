@@ -3,22 +3,28 @@ import numpy as np
 import os
 import time
 import warnings
+import yaml
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from sklearn.metrics import mean_absolute_error
 
 warnings.filterwarnings("ignore")
 
-OUTPUT_DIR = 'outputs/'
-COUNTRY = 'DE' # Selected country
-SIMULATION_HOURS = 2000
-START_HISTORY_HOURS = 120 * 24 # 120 days start history
-ROLLING_WINDOW_HOURS = 90 * 24 # 90 days for refit
-DRIFT_WINDOW_HOURS = 30 * 24 # 30 days for drift threshold
+def load_config():
+    with open("config.yaml", "r") as f:
+        return yaml.safe_load(f)
+
+config = load_config()
+OUTPUT_DIR = config['data']['output_dir']
+COUNTRY = config['countries'][0] # Default to first country (DE)
+SIMULATION_HOURS = config['live_simulation']['simulation_hours']
+START_HISTORY_HOURS = config['live_simulation']['history_days'] * 24
+ROLLING_WINDOW_HOURS = 90 * 24 # 90 days for refit (hardcoded in strategy description)
+DRIFT_WINDOW_HOURS = config['live_simulation']['drift_window_days'] * 24
 METRIC_WINDOW_HOURS = 7 * 24 # 7 days for metrics
 
-# Model Order for DE from Step 1
-ORDER = (2, 0, 1)
-SEASONAL_ORDER = (1, 1, 1, 24)
+# Model Order for DE from Config
+ORDER = tuple(config['forecasting']['model_orders'][COUNTRY]['order'])
+SEASONAL_ORDER = tuple(config['forecasting']['model_orders'][COUNTRY]['seasonal_order'])
 
 def load_data():
     # Load cleaned data

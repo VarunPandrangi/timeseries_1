@@ -2,14 +2,20 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import yaml
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # Page Config
 st.set_page_config(page_title="OPSD PowerDesk Dashboard", layout="wide")
 
-OUTPUT_DIR = 'outputs/'
-COUNTRIES = ['DE', 'FR', 'ES']
+def load_config():
+    with open("config.yaml", "r") as f:
+        return yaml.safe_load(f)
+
+config = load_config()
+OUTPUT_DIR = config['data']['output_dir']
+COUNTRIES = config['countries']
 
 @st.cache_data
 def load_data(country_code):

@@ -2,12 +2,18 @@ import pandas as pd
 import numpy as np
 import os
 import json
+import yaml
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import precision_recall_curve, auc, f1_score
 from sklearn.model_selection import train_test_split
 from sklearn.impute import SimpleImputer
 
-OUTPUT_DIR = 'outputs/'
+def load_config():
+    with open("config.yaml", "r") as f:
+        return yaml.safe_load(f)
+
+config = load_config()
+OUTPUT_DIR = config['data']['output_dir']
 
 def generate_silver_labels(df):
     # 3.2.i Create "silver labels"
@@ -187,5 +193,5 @@ def train_anomaly_classifier(countries):
     print(f"Saved ML evaluation to {os.path.join(OUTPUT_DIR, 'anomaly_ml_eval.json')}")
 
 if __name__ == "__main__":
-    COUNTRIES = ['DE', 'FR', 'ES']
+    COUNTRIES = config['countries']
     train_anomaly_classifier(COUNTRIES)

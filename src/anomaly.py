@@ -1,9 +1,19 @@
 import pandas as pd
 import numpy as np
 import os
+import yaml
 
-OUTPUT_DIR = 'outputs/'
-COUNTRIES = ['DE', 'FR', 'ES']
+def load_config():
+    with open("config.yaml", "r") as f:
+        return yaml.safe_load(f)
+
+config = load_config()
+OUTPUT_DIR = config['data']['output_dir']
+COUNTRIES = config['countries']
+Z_WINDOW = config['anomaly_detection']['z_score_window']
+Z_THRESH = config['anomaly_detection']['z_score_threshold']
+CUSUM_K = config['anomaly_detection']['cusum_k']
+CUSUM_H = config['anomaly_detection']['cusum_h']
 
 def load_forecasts(country_code):
     # Load Dev and Test to have enough history for rolling stats
@@ -48,8 +58,8 @@ def detect_anomalies_unsupervised(df, country_code):
     
     # 3.1.ii Rolling z-score
     # window = 336h (14d), min_periods = 168
-    window = 336
-    min_periods = 168
+    window = Z_WINDOW
+    min_periods = window // 2
     
     # We compute rolling stats on the whole series (Dev+Test) to warm up for Test
     roll_mean = df['resid'].rolling(window=window, min_periods=min_periods).mean()
@@ -58,13 +68,13 @@ def detect_anomalies_unsupervised(df, country_code):
     df['z_resid'] = (df['resid'] - roll_mean) / roll_std
     
     # 3.1.iii Flag anomaly if |zt| >= 3.0
-    df['flag_z'] = (df['z_resid'].abs() >= 3.0).astype(int)
+    df['flag_z'] = (df['z_resid'].abs() >= Z_THRESH).astype(int)
     
     # 3.1.iv Optional CUSUM
     # k=0.5, h=5.0 on zt
     # Fill NaNs in z_resid with 0 for CUSUM calculation or skip
     z_clean = df['z_resid'].fillna(0)
-    df['flag_cusum'] = compute_cusum(z_clean, k=0.5, h=5.0).astype(int)
+    df['flag_cusum'] = compute_cusum(z_clean, k=CUSUM_K, h=CUSUM_H).astype(int)
     
     # Filter for Test set only for output
     df_test = df[df['set'] == 'test'].copy()
