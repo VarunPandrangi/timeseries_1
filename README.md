@@ -1,199 +1,274 @@
-# OPSD PowerDesk: Day-Ahead Forecasting & Anomaly Detection
+# OPSD PowerDesk
 
-## 1. Introduction
-This project implements a robust, production-ready pipeline for **Day-Ahead Electric Load Forecasting** and **Anomaly Detection** for three major European power grids: **Germany (DE)**, **France (FR)**, and **Spain (ES)**.
+Day-ahead electric load forecasting, anomaly detection, live monitoring, and dashboarding for European power grids.
 
-The system is designed to handle real-world challenges such as seasonality, trend shifts, and data irregularities. It leverages the **Open Power System Data (OPSD)** platform and employs a hybrid approach combining classical statistical methods (SARIMA) with modern machine learning techniques (GRU, Logistic Regression) to ensure high accuracy and reliability.
+## Overview
 
-Key capabilities include:
-*   **24-hour Horizon Forecasting**: Accurate hourly load predictions for the next day.
-*   **Real-time Anomaly Detection**: Identification of abnormal load patterns using statistical and ML classifiers.
-*   **Online Adaptation**: A simulated live environment that automatically retrains models in response to concept drift or scheduled updates.
-*   **Interactive Dashboard**: A Streamlit-based interface for monitoring grid status and model performance.
+This project builds a 24-step (day-ahead) forecasting system using Open Power System Data (OPSD) hourly time series. It covers three European countries: Germany (DE), France (FR), and Spain (ES).
 
-## 2. Repository Structure
-The project is organized as follows:
+The pipeline includes:
+- Classical SARIMA forecasting with automatic order selection
+- GRU neural network for direct multi-horizon prediction
+- Anomaly detection using residual z-scores and CUSUM
+- Machine learning classifier for anomaly verification
+- Live simulation with online model adaptation
+- Interactive Streamlit dashboard
+
+## Countries
+
+| Code | Country |
+|------|---------|
+| DE | Germany |
+| FR | France |
+| ES | Spain |
+
+## Project Structure
 
 ```
 OPSD_PowerDesk/
-├── config.yaml                 # Global configuration (countries, thresholds, params)
-├── requirements.txt            # Python dependencies
-├── README.md                   # Project documentation
-├── data/                       # Raw input data
-│   └── time_series_60min_singleindex.csv
-├── outputs/                    # Generated artifacts (Cleaned data, Forecasts, Plots, Models)
-│   ├── *_cleaned.csv           # Preprocessed time series
-│   ├── *_forecasts_*.csv       # Forecast results (Dev/Test)
-│   ├── *_anomalies.csv         # Detected anomalies
-│   ├── *_online_simulation.csv # Live simulation results
-│   ├── metrics_summary.csv     # Final model evaluation metrics
-│   └── plots/                  # EDA and diagnostic plots
-└── src/                        # Source code
-    ├── load_opsd.py            # Data ingestion & cleaning
-    ├── decompose_acf_pacf.py   # EDA: STL, Stationarity, Order Selection
-    ├── forecast.py             # Backtesting (SARIMA & GRU)
-    ├── anomaly.py              # Unsupervised Anomaly Detection (Z-score, CUSUM)
-    ├── anomaly_ml.py           # Supervised Anomaly Classification (Logistic Regression)
-    ├── live_loop.py            # Live Simulation with Online Learning
-    ├── dashboard_app.py        # Interactive Streamlit Dashboard
-    └── metrics.py              # Evaluation metrics (MASE, sMAPE, Coverage)
+├── config.yaml              # Configuration file (countries, thresholds, model parameters)
+├── requirements.txt         # Python dependencies
+├── run_pipeline.py          # Pipeline orchestrator (runs all scripts in sequence)
+├── README.md                # This file
+│
+├── data/
+│   ├── time_series_60min_singleindex.csv   # Raw OPSD data (not in repo, too large)
+│   └── processed/                          # Preprocessed country data and plots
+│       ├── DE_processed.csv
+│       ├── FR_processed.csv
+│       ├── IT_processed.csv
+│       └── *.png                           # Sanity check and analysis plots
+│
+├── src/
+│   ├── load_opsd.py           # Data loading and cleaning
+│   ├── decompose_acf_pacf.py  # STL decomposition, ACF/PACF, SARIMA order selection
+│   ├── forecast.py            # SARIMA and GRU backtesting
+│   ├── anomaly.py             # Z-score and CUSUM anomaly detection
+│   ├── anomaly_ml.py          # ML-based anomaly classifier
+│   ├── live_loop.py           # Live simulation with Rolling SARIMA adaptation
+│   ├── dashboard_app.py       # Streamlit dashboard
+│   └── metrics.py             # MASE, sMAPE, MSE, RMSE, MAPE, coverage functions
+│
+└── outputs/
+    ├── model_orders.txt                # Selected SARIMA orders for each country
+    ├── metrics_summary.csv             # All forecasting metrics (Dev and Test)
+    ├── anomaly_labels_verified.csv     # Human-verified anomaly labels
+    ├── anomaly_ml_eval.json            # ML classifier evaluation (PR-AUC, F1)
+    │
+    ├── DE_cleaned.csv                  # Cleaned data for Germany
+    ├── DE_forecasts_dev.csv            # SARIMA Dev set forecasts
+    ├── DE_forecasts_test.csv           # SARIMA Test set forecasts
+    ├── DE_forecasts_dev_gru.csv        # GRU Dev set forecasts
+    ├── DE_forecasts_test_gru.csv       # GRU Test set forecasts
+    ├── DE_anomalies.csv                # Detected anomalies with z-scores
+    ├── DE_online_simulation.csv        # Live simulation results
+    ├── DE_online_updates.csv           # Model update log (timestamp, reason, duration)
+    │
+    ├── FR_cleaned.csv, FR_forecasts_*, FR_anomalies.csv   # France outputs
+    ├── ES_cleaned.csv, ES_forecasts_*, ES_anomalies.csv   # Spain outputs
+    │
+    └── plots/
+        ├── DE_stl_decomposition.png    # STL trend/seasonal/residual
+        ├── DE_acf_pacf_diff_1_24.png   # ACF/PACF for order selection
+        ├── DE_sanity_check.png         # Last 14 days validation plot
+        └── (same for FR and ES)
 ```
 
-## 3. Methodology
+## Source Code Description
 
-### 3.1 Data Ingestion & Preprocessing
-**Script:** `src/load_opsd.py`
+### load_opsd.py
+Reads the raw OPSD CSV and creates tidy dataframes for each country. Renames columns (timestamp, load), drops missing values, and saves cleaned data.
 
-The raw data is sourced from the OPSD Time Series dataset. The pipeline performs the following steps:
-1.  **Extraction**: Loads hourly electricity consumption (`load`), wind generation (`wind`), and solar generation (`solar`) for DE, FR, and ES.
-2.  **Cleaning**:
-    *   Renames columns to a standardized format.
-    *   Drops rows with missing load values.
-    *   Sorts data chronologically by UTC timestamp.
-3.  **Output**: Saves tidy CSV files (e.g., `DE_cleaned.csv`) to the `outputs/` directory.
+### decompose_acf_pacf.py
+Performs exploratory analysis:
+- STL decomposition with period=24 (daily seasonality)
+- Stationarity testing with ADF
+- ACF/PACF plots up to lag 48
+- Grid search over SARIMA parameters using BIC
+- Saves selected orders to model_orders.txt
 
-### 3.2 Exploratory Data Analysis (EDA)
-**Script:** `src/decompose_acf_pacf.py`
+### forecast.py
+Runs expanding-origin backtests:
+- SARIMA: Uses orders from config, generates 24h forecasts with 80% prediction intervals
+- GRU: PyTorch model with 168h input, 24h output, 2 layers, 128 hidden units
+- Saves forecasts for Dev (10%) and Test (10%) sets
+- Computes all metrics: MASE, sMAPE, MSE, RMSE, MAPE, PI coverage
 
-Before modeling, we analyze the time series characteristics:
-1.  **STL Decomposition**: Decomposes the series into **Seasonal** (24h), **Trend**, and **Residual** components to understand underlying patterns.
-2.  **Stationarity Test**: Applies the **Augmented Dickey-Fuller (ADF)** test. If the series is non-stationary ($p > 0.05$), differencing ($d=1$ or $D=1$) is applied.
-3.  **Autocorrelation**: Plots **ACF** and **PACF** to identify significant lags, guiding the selection of SARIMA $(p, q, P, Q)$ parameters.
-4.  **Model Selection**: Performs a grid search over SARIMA parameters, selecting the configuration that minimizes the **Bayesian Information Criterion (BIC)**.
+### anomaly.py
+Detects anomalies on Test set residuals:
+- Rolling z-score with 336h window (14 days)
+- Flags anomalies when |z| >= 3.0
+- CUSUM detection with k=0.5, h=5.0
+- Saves results with flag_z and flag_cusum columns
 
-### 3.3 Forecasting Models
-**Script:** `src/forecast.py`
+### anomaly_ml.py
+Trains a classifier to reduce false positives:
+- Creates silver labels based on z-score and PI coverage
+- Samples 100 points per country for verification
+- Trains Logistic Regression on lag features and calendar variables
+- Reports PR-AUC and F1 at 80% precision
 
-We employ an **Expanding Window Backtest** strategy (Train: 80%, Dev: 10%, Test: 10%) to evaluate model performance.
+### live_loop.py
+Simulates 2000+ hours of live operation for Germany:
+- Processes data hour by hour
+- Generates 24h forecasts at 00:00 UTC
+- Monitors drift using EWMA of |z|
+- Triggers Rolling SARIMA refit (90-day window) on schedule or drift
+- Logs all updates with before/after metrics
 
-#### A. SARIMA (Seasonal AutoRegressive Integrated Moving Average)
-*   **Configuration**: Orders $(p,d,q) \times (P,D,Q)_{24}$ are determined per country from the EDA phase.
-*   **Exogenous Variables**: Includes One-Hot Encoded Hour-of-Day and Day-of-Week, plus Wind and Solar generation.
-*   **Strategy**: The model forecasts the next 24 hours, then "observes" the actual data to update its state for the next step (without full retraining).
+### dashboard_app.py
+Streamlit dashboard with:
+- Country selector
+- Last 7-14 days of actual vs predicted load
+- Forecast cone with 80% prediction interval
+- Anomaly tape highlighting flagged hours
+- KPI tiles: rolling 7-day MASE, PI coverage, anomaly count, last update
 
-#### B. GRU (Gated Recurrent Unit) - *Optional*
-*   **Architecture**: A deep learning model with a GRU layer (64 units) followed by Dense layers.
-*   **Input**: Sequences of the past 168 hours (1 week).
-*   **Output**: Direct multi-step forecast for the next 24 hours.
-*   **Scaling**: MinMax scaling is applied to normalize inputs.
+### metrics.py
+Helper functions for:
+- MASE (Mean Absolute Scaled Error, seasonality=24)
+- sMAPE (Symmetric Mean Absolute Percentage Error)
+- MSE, RMSE, MAPE
+- 80% Prediction Interval coverage
 
-**Evaluation Metrics**:
-*   **MASE (Mean Absolute Scaled Error)**: Measures accuracy relative to a naive seasonal forecast.
-*   **sMAPE (Symmetric Mean Absolute Percentage Error)**: Percentage error robust to near-zero values.
-*   **PI Coverage**: Percentage of actuals falling within the 80% Prediction Interval.
+## Setup
 
-### 3.4 Anomaly Detection
-**Script:** `src/anomaly.py` & `src/anomaly_ml.py`
+### Requirements
+- Python 3.8 or higher
+- See requirements.txt for dependencies
 
-#### Unsupervised Detection
-We analyze the residuals ($e_t = y_t - \hat{y}_t$) from the SARIMA model:
-1.  **Rolling Z-Score**: Calculates $z_t = \frac{e_t - \mu_{rolling}}{\sigma_{rolling}}$ over a 336-hour window.
-    *   **Flag**: Anomaly if $|z_t| > 3.0$.
-2.  **CUSUM (Cumulative Sum)**: Detects persistent shifts in the mean of residuals.
-
-#### Supervised Classification (Machine Learning)
-To reduce false positives, we train a **Logistic Regression** classifier:
-1.  **Silver Labels**: We generate heuristic labels to create a training set:
-    *   *Positive (1)*: High Z-score ($>3.5$) OR (Outside PI AND Z-score $>2.5$).
-    *   *Negative (0)*: Low Z-score ($<1.0$) AND Inside PI.
-2.  **Features**: Lagged load values (24h, 48h), rolling mean/std, hour of day, day of week.
-3.  **Evaluation**: The model is evaluated using **Precision-Recall AUC** and **F1-score** at a fixed precision of 80%.
-
-### 3.5 Live Simulation & Online Learning
-**Script:** `src/live_loop.py`
-
-Simulates a production environment for Germany (DE):
-1.  **Stream**: Iterates through the Test set hour-by-hour.
-2.  **Forecast**: Generates a 24h forecast at 00:00 UTC daily.
-3.  **Monitoring**: Tracks drift using an Exponentially Weighted Moving Average (EWMA) of the Z-score.
-4.  **Online Adaptation**:
-    *   **Trigger**: Scheduled (daily) or Drift Detected (EWMA > threshold).
-    *   **Action**: Retrains the SARIMA model on the most recent 90 days of data.
-    *   **Logging**: Records performance metrics (MASE) before and after retraining to quantify improvement.
-
-## 4. Setup & Usage
-
-### 4.1 Prerequisites
-Ensure you have Python 3.8+ installed. Install dependencies:
+### Installation
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4.2 Execution Pipeline
-Run the following commands in order to reproduce the full analysis:
+### Data
+Download the OPSD hourly time series CSV and place it in:
+```
+data/time_series_60min_singleindex.csv
+```
 
-**Step 1: Data Preparation**
+## Usage
+
+### Run Full Pipeline
+```bash
+python run_pipeline.py
+```
+
+This runs all scripts in order:
+1. load_opsd.py
+2. decompose_acf_pacf.py
+3. forecast.py
+4. anomaly.py
+5. anomaly_ml.py
+6. live_loop.py
+
+### Run Individual Scripts
 ```bash
 python src/load_opsd.py
-```
-
-**Step 2: EDA & Model Selection**
-```bash
 python src/decompose_acf_pacf.py
-```
-
-**Step 3: Forecasting (Backtest)**
-```bash
 python src/forecast.py
-```
-
-**Step 4: Anomaly Detection**
-```bash
 python src/anomaly.py
 python src/anomaly_ml.py
-```
-
-**Step 5: Live Simulation**
-```bash
 python src/live_loop.py
 ```
 
-### 4.3 Dashboard
-Launch the interactive dashboard to visualize the live simulation results:
+### Launch Dashboard
 ```bash
 streamlit run src/dashboard_app.py
 ```
 
-## 5. Results
+## Results
 
-### 5.1 Model Selection & Parameters
-The following SARIMA configurations were selected based on the lowest BIC during the grid search phase:
+### SARIMA Orders (Selected via BIC)
 
-| Country | Order $(p,d,q)$ | Seasonal $(P,D,Q)_{24}$ | BIC | AIC |
-| :--- | :--- | :--- | :--- | :--- |
-| **Germany (DE)** | $(2, 0, 1)$ | $(1, 1, 1)$ | 10098.36 | 10071.76 |
-| **France (FR)** | $(2, 0, 2)$ | $(1, 1, 1)$ | 9963.65 | 9932.63 |
-| **Spain (ES)** | $(1, 0, 2)$ | $(1, 1, 1)$ | 9045.93 | 9019.34 |
+| Country | Order (p,d,q) | Seasonal (P,D,Q,s) |
+|---------|---------------|-------------------|
+| DE | (2, 1, 2) | (1, 1, 1, 24) |
+| FR | (1, 1, 2) | (1, 1, 1, 24) |
+| ES | (2, 1, 2) | (1, 1, 1, 24) |
 
-### 5.2 Forecasting Performance (Test Set)
-The models were evaluated on the held-out Test set (last 10% of data). The **GRU** model generally outperformed SARIMA in terms of point accuracy (MASE, sMAPE), likely due to its ability to capture non-linear interactions. However, SARIMA provides valuable probabilistic outputs (Prediction Intervals).
+### Forecasting Performance
 
-| Country | Model | MASE | sMAPE (%) | RMSE (MW) | PI Coverage (80%) |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **DE** | SARIMA | **0.539** | 5.19 | 3496 | **90.4%** |
-| **DE** | GRU | 0.351 | 3.07 | 2201 | N/A |
-| **FR** | SARIMA | 0.800 | 5.44 | 3862 | 69.4% |
-| **FR** | GRU | 0.518 | 3.63 | 2674 | N/A |
-| **ES** | SARIMA | 0.635 | 4.50 | 1565 | 79.0% |
-| **ES** | GRU | 0.454 | 3.21 | 1089 | N/A |
+#### Test Set Results
 
-*Note: MASE < 1 indicates the model outperforms a seasonal naive baseline.*
+| Country | Model | MASE | sMAPE | RMSE | PI Coverage (80%) |
+|---------|-------|------|-------|------|-------------------|
+| DE | SARIMA | 0.539 | 5.19% | 3496 | 90.4% |
+| DE | GRU | 0.524 | 4.65% | 3474 | - |
+| FR | SARIMA | 0.705 | 4.84% | 3469 | 80.6% |
+| FR | GRU | 0.569 | 3.97% | 2906 | - |
+| ES | SARIMA | 0.637 | 4.52% | 1567 | 78.8% |
+| ES | GRU | 0.664 | 4.63% | 1560 | - |
 
-### 5.3 Anomaly Detection (ML Classifier)
-The Logistic Regression classifier, trained on "silver" labels, achieved robust performance in distinguishing true anomalies from noise.
+MASE below 1.0 means the model outperforms a seasonal naive baseline. Both SARIMA and GRU achieve this for all countries.
 
-*   **Precision-Recall AUC**: 0.821
-*   **F1-Score (at 80% Precision)**: 0.753
-*   **Test Samples**: 89 (44 Positives)
+#### Dev Set Results
 
-### 5.4 Live Simulation (Germany)
-The online simulation demonstrated the system's ability to adapt to changing conditions.
-*   **Total Updates**: Multiple retraining events triggered by schedule (daily) and concept drift.
-*   **Adaptation Impact**: For example, on **2020-03-12**, a scheduled retrain reduced the 7-day rolling MASE from **0.588** to **0.466**, significantly improving forecast accuracy.
-*   **Drift Detection**: The system successfully identified drift events (e.g., on 2020-04-10) and triggered ad-hoc retraining.
+| Country | Model | MASE | sMAPE | RMSE | PI Coverage (80%) |
+|---------|-------|------|-------|------|-------------------|
+| DE | SARIMA | 0.608 | 5.24% | 3796 | 86.6% |
+| DE | GRU | 0.626 | 4.91% | 3662 | - |
+| FR | SARIMA | 0.828 | 4.60% | 3508 | 72.7% |
+| FR | GRU | 0.753 | 4.09% | 2977 | - |
+| ES | SARIMA | 0.722 | 4.68% | 1841 | 76.2% |
+| ES | GRU | 0.650 | 3.97% | 1545 | - |
 
-All detailed logs are available in `outputs/DE_online_simulation.csv` and `outputs/DE_online_updates.csv`.
+### Anomaly Detection
 
-## 6. References
-1.  Open Power System Data. (2020). Data Package Time Series.
-2.  Hyndman, R. J., & Athanasopoulos, G. (2018). Forecasting: principles and practice. OTexts.
+#### ML Classifier Performance
+- PR-AUC: 0.822
+- F1 at 80% Precision: 0.649
+- Test Samples: 88 (44 positives, 44 negatives)
+
+### Live Simulation (Germany)
+
+- Total Hours Simulated: 2001
+- Adaptation Strategy: Rolling SARIMA (90-day window)
+- Update Triggers: Scheduled (daily at 00:00) and drift-based
+- Total Updates: 132 (scheduled + drift triggers)
+
+The system successfully detects drift events and triggers retraining to maintain forecast accuracy.
+
+## Configuration
+
+All parameters are in config.yaml:
+
+```yaml
+countries: [DE, FR, ES]
+forecasting:
+  horizon: 24
+  train_ratio: 0.8
+  dev_ratio: 0.1
+  test_ratio: 0.1
+anomaly:
+  z_score_window: 336
+  z_score_threshold: 3.0
+  cusum_k: 0.5
+  cusum_h: 5.0
+live:
+  start_history_days: 120
+  min_simulation_hours: 2000
+  drift_alpha: 0.1
+  drift_percentile: 95
+```
+
+## Limitations
+
+- GRU does not provide prediction intervals (only point forecasts)
+- Live simulation runs on historical data, not real-time feeds
+- SARIMA refitting is computationally expensive
+- Wind and solar features are optional and may have missing values
+- Model performance may degrade during holidays or extreme weather events
+
+## Dependencies
+
+Key packages:
+- pandas, numpy
+- statsmodels (SARIMAX)
+- torch (PyTorch GRU)
+- scikit-learn
+- streamlit
+- matplotlib
+
+See requirements.txt for full list.
