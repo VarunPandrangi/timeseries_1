@@ -3,6 +3,4 @@ __pycache__/
 *.pyc
 .DS_Store
 data/*.csv
-outputs/*.csv
-outputs/*.json
-outputs/plots/
+
